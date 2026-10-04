@@ -1,0 +1,156 @@
+"""项目内部接口说明。"""
+
+import json
+import struct
+from typing import Any
+
+from jupyter_client.session import Session
+from tornado.websocket import WebSocketHandler
+from traitlets import Float, Instance, Unicode, default
+from traitlets.config import LoggingConfigurable
+
+try:
+    from jupyter_client.jsonutil import json_default
+except ImportError:
+    from jupyter_client.jsonutil import date_default as json_default
+
+from jupyter_client.jsonutil import extract_dates
+
+from jupyter_server.transutils import _i18n
+
+from .abc import KernelWebsocketConnectionABC
+
+
+def serialize_binary_message(msg):
+    """项目内部接口说明。"""
+    # don't modify msg or buffer list in-place
+    msg = msg.copy()
+    buffers = list(msg.pop("buffers"))
+    bmsg = json.dumps(msg, default=json_default).encode("utf8")
+    buffers.insert(0, bmsg)
+    nbufs = len(buffers)
+    offsets = [4 * (nbufs + 1)]
+    for buf in buffers[:-1]:
+        offsets.append(offsets[-1] + len(buf))
+    offsets_buf = struct.pack("!" + "I" * (nbufs + 1), nbufs, *offsets)
+    buffers.insert(0, offsets_buf)
+    return b"".join(buffers)
+
+
+def deserialize_binary_message(bmsg):
+    """项目内部接口说明。"""
+    nbufs = struct.unpack("!i", bmsg[:4])[0]
+    offsets = list(struct.unpack("!" + "I" * nbufs, bmsg[4 : 4 * (nbufs + 1)]))
+    offsets.append(None)
+    bufs = []
+    for start, stop in zip(offsets[:-1], offsets[1:], strict=False):
+        bufs.append(bmsg[start:stop])
+    msg = json.loads(bufs[0].decode("utf8"))
+    msg["header"] = extract_dates(msg["header"])
+    msg["parent_header"] = extract_dates(msg["parent_header"])
+    msg["buffers"] = bufs[1:]
+    return msg
+
+
+def serialize_msg_to_ws_v1(msg_or_list, channel, pack=None):
+    """项目内部接口说明。"""
+    if pack:
+        msg_list = [
+            pack(msg_or_list["header"]),
+            pack(msg_or_list["parent_header"]),
+            pack(msg_or_list["metadata"]),
+            pack(msg_or_list["content"]),
+        ]
+    else:
+        msg_list = msg_or_list
+    channel = channel.encode("utf-8")
+    offsets: list[Any] = []
+    offsets.append(8 * (1 + 1 + len(msg_list) + 1))
+    offsets.append(len(channel) + offsets[-1])
+    for msg in msg_list:
+        offsets.append(len(msg) + offsets[-1])
+    offset_number = len(offsets).to_bytes(8, byteorder="little")
+    offsets = [offset.to_bytes(8, byteorder="little") for offset in offsets]
+    bin_msg = b"".join([offset_number, *offsets, channel, *msg_list])
+    return bin_msg
+
+
+def deserialize_msg_from_ws_v1(ws_msg):
+    """项目内部接口说明。"""
+    offset_number = int.from_bytes(ws_msg[:8], "little")
+    offsets = [
+        int.from_bytes(ws_msg[8 * (i + 1) : 8 * (i + 2)], "little") for i in range(offset_number)
+    ]
+    channel = ws_msg[offsets[0] : offsets[1]].decode("utf-8")
+    msg_list = [ws_msg[offsets[i] : offsets[i + 1]] for i in range(1, offset_number - 1)]
+    return channel, msg_list
+
+
+class BaseKernelWebsocketConnection(LoggingConfigurable):
+    """项目内部接口说明。"""
+
+    kernel_ws_protocol = Unicode(
+        None,
+        allow_none=True,
+        config=True,
+        help=_i18n(
+            "Preferred kernel message protocol over websocket to use (default: None). "
+            "If an empty string is passed, select the legacy protocol. If None, "
+            "the selected protocol will depend on what the front-end supports "
+            "(usually the most recent protocol supported by the back-end and the "
+            "front-end)."
+        ),
+    )
+
+    @property
+    def kernel_manager(self):
+        """项目内部接口说明。"""
+        return self.parent
+
+    @property
+    def multi_kernel_manager(self):
+        """项目内部接口说明。"""
+        return self.kernel_manager.parent
+
+    @property
+    def kernel_id(self):
+        """项目内部接口说明。"""
+        return self.kernel_manager.kernel_id
+
+    @property
+    def session_id(self):
+        """项目内部接口说明。"""
+        return self.session.session
+
+    kernel_info_timeout = Float()
+
+    @default("kernel_info_timeout")
+    def _default_kernel_info_timeout(self):
+        return self.multi_kernel_manager.kernel_info_timeout
+
+    session = Instance(klass=Session, config=True)
+
+    @default("session")
+    def _default_session(self):
+        return Session(config=self.config)
+
+    websocket_handler = Instance(WebSocketHandler)
+
+    async def connect(self):
+        """项目内部接口说明。"""
+        raise NotImplementedError
+
+    async def disconnect(self):
+        """项目内部接口说明。"""
+        raise NotImplementedError
+
+    def handle_incoming_message(self, incoming_msg: str) -> None:
+        """项目内部接口说明。"""
+        raise NotImplementedError
+
+    def handle_outgoing_message(self, stream: str, outgoing_msg: list[Any]) -> None:
+        """项目内部接口说明。"""
+        raise NotImplementedError
+
+
+KernelWebsocketConnectionABC.register(BaseKernelWebsocketConnection)

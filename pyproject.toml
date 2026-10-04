@@ -1,0 +1,262 @@
+[build-system]
+requires = ["hatchling >=1.11"]
+build-backend = "hatchling.build"
+
+[project]
+name = "jupyter_server"
+dynamic = ["version"]
+readme = "README.md"
+license = { file = "LICENSE" }
+description = "The backend—i.e. core services, APIs, and REST endpoints—to Jupyter web applications."
+authors = [{name = "Jupyter Development Team", email = "jupyter@googlegroups.com"}]
+keywords = ["ipython", "jupyter"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Framework :: Jupyter",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "anyio>=3.1.0",
+    "argon2-cffi>=21.1",
+    "jinja2>=3.0.3",
+    "jupyter_client>=7.4.4",
+    "jupyter_core>=4.12,!=5.0.*",
+    "jupyter_server_terminals>=0.4.4",
+    "nbconvert>=6.4.4",
+    "nbformat>=5.3.0",
+    "packaging>=22.0",
+    "prometheus_client>=0.9",
+    # pywinpty 3.0.4 ships broken Windows wheels: winpty.dll (amd64) and all native
+    # binaries (arm64) are no longer bundled, so the .pyd fails to load -> import winpty
+    # raises ImportError -> terminado falls back to `object` -> object.spawn AttributeError.
+    # See https://github.com/andfoy/pywinpty/issues/573 (regressed in 3.0.4, 2026-06-10).
+    "pywinpty>=2.0.1,!=3.0.4;os_name=='nt'",
+    "pyzmq>=24",
+    "Send2Trash>=1.8.2",
+    "terminado>=0.8.3",
+    "tornado>=6.2.0",
+    "traitlets>=5.6.0",
+    "websocket-client>=1.7",
+    "jupyter_events>=0.11.0",
+    "overrides>=5.0;python_version<'3.12'"
+]
+
+[project.urls]
+Homepage = "https://jupyter-server.readthedocs.io"
+Documentation = "https://jupyter-server.readthedocs.io"
+Funding = "https://jupyter.org/about#donate"
+Source = "https://github.com/jupyter-server/jupyter_server"
+Tracker = "https://github.com/jupyter-server/jupyter_server/issues"
+
+[project.optional-dependencies]
+test = [
+    "ipykernel",
+    "pytest-console-scripts",
+    "pytest-timeout",
+    "pytest-jupyter[server]>=0.7",
+    "pytest>=7.0,<10",
+    "requests",
+    "pre-commit",
+    'flaky'
+]
+docs = [
+    "ipykernel",
+    "jinja2",
+    "jupyter_client",
+    "jupyter_server",
+    "myst-parser",
+    "nbformat",
+    "prometheus_client",
+    "pydata_sphinx_theme",
+    "Send2Trash",
+    "sphinx<9.0",
+    "sphinxcontrib-openapi>=0.8.0",
+    "sphinxcontrib_github_alt",
+    "sphinxcontrib-spelling",
+    "sphinx-autodoc-typehints",
+    "sphinxemoji",
+    "tornado",
+    # workaround for an unknown downstream library that is now
+    # missing typing_extensions
+    "typing_extensions"
+]
+
+
+[project.scripts]
+jupyter-server = "jupyter_server.serverapp:main"
+
+[tool.hatch.envs.docs]
+features = ["docs"]
+[tool.hatch.envs.docs.scripts]
+build = "make -C docs html SPHINXOPTS='-W'"
+api = "sphinx-apidoc -o docs/source/api -f -E jupyter_server */terminal jupyter_server/pytest_plugin.py"
+
+[tool.hatch.envs.test]
+features = ["test"]
+[tool.hatch.envs.test.scripts]
+test = "python -m pytest -vv {args}"
+nowarn = "test -W default {args}"
+
+[tool.hatch.envs.typing]
+dependencies = [ "pre-commit"]
+detached = true
+[tool.hatch.envs.typing.scripts]
+test = "pre-commit run --all-files --hook-stage manual mypy"
+
+[tool.hatch.envs.cov]
+features = ["test"]
+dependencies = ["coverage[toml]", "pytest-cov"]
+[tool.hatch.envs.cov.scripts]
+test = "python -m pytest -vv --cov jupyter_server --cov-branch --cov-report term-missing:skip-covered {args}"
+nowarn = "test -W default {args}"
+integration = "test --integration_tests=true {args}"
+
+[tool.hatch.version]
+path = "jupyter_server/_version.py"
+validate-bump = false
+
+[tool.hatch.build]
+artifacts = ["jupyter_server/static/style"]
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["build", "dist", "tests"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]
+ignore = [
+  "ARG", "TRY", "RUF012", "TID252", "G", "INP001", "E402", "F401",
+  "BLE001", "PLC0415", "RUF100", "SIM102", "RUF007", "PIE794",
+]
+extend-select = [
+  "B",  # flake8-bugbear
+  "I",  # isort
+  "UP",  # pyupgrade
+  "G001", # no % or f formatting in logs, prevents sttructured logging
+]
+unfixable = [
+  # Don't touch print statements
+  "T201",
+  # Don't touch unused imports
+  "F401",
+  # Don't touch noqa lines
+  "RUF100"
+]
+
+[tool.ruff.lint.extend-per-file-ignores]
+"jupyter_server/*" = ["S101", "RET", "S110", "UP031", "FBT", "FA100", "SLF001", "A002",
+                      "SIM105", "A001", "PLR2004", "T201", "N818", "F403"]
+"jupyter_server/gateway/*" = ["TCH" ]
+"tests/*" = ["UP031", "PT", 'EM', "TRY", "RET", "SLF", "C408", "F841", "FBT", "A002", "FLY", "N",
+            "PERF", "ASYNC", "T201", "FA100", "E711", "INP", "TCH", "SIM105", "A001", "PLW0603",
+            "RUF059"]
+"examples/*_config.py" = ["F821"]
+"examples/*" = ["N815"]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+xfail_strict = true
+log_cli_level = "debug"
+addopts = [
+  "-ra", "--durations=10", "--color=yes", "--doctest-modules",
+   "--showlocals", "--strict-markers", "--strict-config"
+]
+testpaths = [
+    "tests/auth/test_identity.py",
+    "tests/auth/test_security.py",
+    "tests/auth/test_utils.py",
+    "tests/extension",
+    "tests/services/contents/test_manager.py",
+    "tests/services/contents/test_checkpoints.py",
+    "tests/services/sessions/test_manager.py",
+]
+timeout = 100
+# Restore this setting to debug failures.
+timeout_method = "thread"
+filterwarnings = [
+  "error",
+  "ignore:datetime.datetime.utc:DeprecationWarning",
+  "module:add_callback_from_signal is deprecated:DeprecationWarning",
+  "ignore::jupyter_server.utils.JupyterServerAuthWarning",
+
+  # ignore unclosed sqlite in traits
+  "ignore:unclosed database in <sqlite3.Connection:ResourceWarning",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+  "pragma: no cover",
+  "def __repr__",
+  "if self.debug:",
+  "if settings.DEBUG",
+  "if TYPE_CHECKING:",
+  "raise AssertionError",
+  "raise NotImplementedError",
+  "if 0:",
+  "if __name__ == .__main__.:",
+  "class .*\bProtocol\\):",
+"@(abc\\.)?abstractmethod",
+]
+
+[tool.coverage.run]
+relative_files = true
+source = ["jupyter_server"]
+
+[tool.jupyter-releaser.hooks]
+before-build-python = ["npm install", "npm run build"]
+
+[tool.jupyter-releaser.options]
+pydist_resource_paths = ["jupyter_server/static/style/bootstrap.min.css", "jupyter_server/static/style/bootstrap-theme.min.css"]
+post-version-spec = "dev"
+
+[tool.mypy]
+python_version = "3.10"
+files = ["jupyter_server"]
+exclude = [
+  "^build/",
+  "^dist/",
+  "^tests/",
+  "^jupyter_server/gateway/",
+  "^jupyter_server/services/kernels/connection/",
+  '^jupyter_server/services/kernels/kernelmanager\.py$',
+]
+explicit_package_bases = true
+strict = true
+pretty = true
+warn_unreachable = true
+disable_error_code = ["no-untyped-def", "no-untyped-call", "unused-ignore"]
+enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
+
+[[tool.mypy.overrides]]
+module = ["notebook.*", "pysqlite2.*", "overrides", "send2trash"]
+ignore_missing_imports = true
+
+[tool.interrogate]
+ignore-init-module=true
+ignore-private=true
+ignore-semiprivate=true
+ignore-property-decorators=true
+ignore-nested-functions=true
+ignore-nested-classes=true
+fail-under=95
+exclude = ["docs", "test"]
+
+[tool.check-wheel-contents]
+ignore = ["W002"]
+
+[tool.repo-review]
+ignore = [
+  "GH102", # auto-cancel
+  "PC111", # blacken-docs
+  "PP006", # dependency-group, not ready yet
+  "PP304", # pytest log_level (breaks tests)
+]

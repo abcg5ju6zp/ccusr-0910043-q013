@@ -1,0 +1,21 @@
+"""项目内部接口说明。"""
+
+from .app import MockExtensionApp, MockExtensionNoTemplateApp
+
+
+# Function that makes these extensions discoverable
+# by the test functions.
+def _jupyter_server_extension_points():
+    return [
+        {
+            "module": "tests.extension.mockextensions.app",
+            "app": MockExtensionApp,
+        },
+        {
+            "module": "tests.extension.mockextensions.app",
+            "app": MockExtensionNoTemplateApp,
+        },
+        {"module": "tests.extension.mockextensions.mock1"},
+        {"module": "tests.extension.mockextensions.mock2"},
+        {"module": "tests.extension.mockextensions.mock3"},
+    ]
