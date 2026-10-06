@@ -102,6 +102,10 @@ from jupyter_server.base.handlers import (
 )
 from jupyter_server.extension.config import ExtensionConfigManager
 from jupyter_server.extension.manager import ExtensionManager
+from jupyter_server.extension.rollout import (
+    ExtensionConfigRolloutCoordinator,
+    TraitletConfigAdapter,
+)
 from jupyter_server.extension.serverextension import ServerExtensionApp
 from jupyter_server.gateway.connections import GatewayWebSocketConnection
 from jupyter_server.gateway.gateway_client import GatewayClient
@@ -203,6 +207,7 @@ JUPYTER_SERVICE_HANDLERS = {
     "shutdown": ["jupyter_server.services.shutdown"],
     "view": ["jupyter_server.view.handlers"],
     "events": ["jupyter_server.services.events.handlers"],
+    "extension-config": ["jupyter_server.extension.rollout_handlers"],
 }
 
 # Added for backwards compatibility from classic notebook server.
@@ -446,6 +451,9 @@ class ServerWebApplication(web.Application):
             "session_manager": session_manager,
             "kernel_spec_manager": kernel_spec_manager,
             "config_manager": config_manager,
+            "extension_config_coordinator": getattr(
+                jupyter_app, "extension_config_coordinator", None
+            ),
             "authorizer": authorizer,
             "identity_provider": identity_provider,
             "event_logger": event_logger,
@@ -913,6 +921,7 @@ class ServerApp(JupyterApp):
         "shutdown",
         "view",
         "events",
+        "extension-config",
     )
 
     _log_formatter_cls = LogFormatter  # type:ignore[assignment]
@@ -2116,6 +2125,10 @@ class ServerApp(JupyterApp):
             parent=self,
             log=self.log,
         )
+        self.extension_config_coordinator = ExtensionConfigRolloutCoordinator(
+            parent=self,
+            log=self.log,
+        )
         identity_provider_kwargs = {"parent": self, "log": self.log}
 
         if (
@@ -2516,6 +2529,23 @@ class ServerApp(JupyterApp):
         """项目内部接口说明。"""
         self.extension_manager.load_all_extensions()
 
+    def init_extension_config_rollout(self) -> None:
+        """装配扩展配置的事务化变更机制。
+
+        为每个带 ExtensionApp 的扩展点注册配置参与者,以当前运行态
+        配置作为基线快照,随后重放变更日志完成崩溃恢复。
+        """
+        coordinator = self.extension_config_coordinator
+        base_configs: dict[str, t.Any] = {}
+        for name, point in sorted(self.extension_manager.extension_points.items()):
+            if point.app is None:
+                continue
+            adapter = TraitletConfigAdapter(point.app, name=name)
+            coordinator.register_participant(adapter)
+            base_configs[name] = adapter.current_config()
+        coordinator.seed_base_configs(base_configs)
+        coordinator.recover()
+
     def init_mime_overrides(self) -> None:
         # On some Windows machines, an application has registered incorrect
         # mimetypes in the registry.
@@ -2778,6 +2808,7 @@ class ServerApp(JupyterApp):
         self.init_webapp()
         self.init_signal()
         self.load_server_extensions()
+        self.init_extension_config_rollout()
         self.init_mime_overrides()
         self.init_shutdown_no_activity()
         self.init_metrics()
