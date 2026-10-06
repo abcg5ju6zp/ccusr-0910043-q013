@@ -101,6 +101,7 @@ from jupyter_server.base.handlers import (
     Template404,
 )
 from jupyter_server.extension.config import ExtensionConfigManager
+from jupyter_server.extension.configtxn import ExtensionConfigTransactionManager
 from jupyter_server.extension.manager import ExtensionManager
 from jupyter_server.extension.serverextension import ServerExtensionApp
 from jupyter_server.gateway.connections import GatewayWebSocketConnection
@@ -184,7 +185,10 @@ jupyter server password              # enter a password to protect the server
 JUPYTER_SERVICE_HANDLERS = {
     "auth": None,
     "api": ["jupyter_server.services.api.handlers"],
-    "config": ["jupyter_server.services.config.handlers"],
+    "config": [
+        "jupyter_server.services.config.handlers",
+        "jupyter_server.extension.configtxn.handlers",
+    ],
     "contents": ["jupyter_server.services.contents.handlers"],
     "files": ["jupyter_server.files.handlers"],
     "kernels": [
@@ -446,6 +450,9 @@ class ServerWebApplication(web.Application):
             "session_manager": session_manager,
             "kernel_spec_manager": kernel_spec_manager,
             "config_manager": config_manager,
+            "extension_config_txn_manager": getattr(
+                jupyter_app, "extension_config_txn_manager", None
+            ),
             "authorizer": authorizer,
             "identity_provider": identity_provider,
             "event_logger": event_logger,
@@ -1662,6 +1669,12 @@ class ServerApp(JupyterApp):
         help=_i18n("The config manager class to use"),
     )
 
+    extension_config_txn_manager_class = Type(
+        default_value=ExtensionConfigTransactionManager,
+        config=True,
+        help=_i18n("The extension config transaction manager class to use"),
+    )
+
     kernel_spec_manager = Instance(KernelSpecManager, allow_none=True)
 
     kernel_spec_manager_class = Type(
@@ -2116,6 +2129,16 @@ class ServerApp(JupyterApp):
             parent=self,
             log=self.log,
         )
+        self.extension_config_txn_manager = self.extension_config_txn_manager_class(
+            parent=self,
+            log=self.log,
+            config_manager=self.config_manager,
+            extension_manager=getattr(self, "extension_manager", None),
+            serverapp=self,
+        )
+        # 崩溃恢复：完成或回退上一进程遗留的未完成变更单，
+        # 保证配置文件与 journal 中的已提交状态收敛一致。
+        self.extension_config_txn_manager.recover()
         identity_provider_kwargs = {"parent": self, "log": self.log}
 
         if (

@@ -411,6 +411,32 @@ class ExtensionApp(JupyterApp):
     async def stop_extension(self):
         """项目内部接口说明。"""
 
+    # ------------------------------------------------------------------
+    # 配置变更两阶段提交协议（jupyter_server.extension.configtxn）
+    # ------------------------------------------------------------------
+
+    #: 是否支持回退“已准备但未提交”的配置变更。
+    #: 置为 False 时，一旦事务需要回退，本扩展会被标记为 unsupported，
+    #: 变更单进入 recovery_required 终态并保留现场。
+    supports_config_rollback = True
+
+    async def prepare_config_change(self, change, context):
+        """准备阶段钩子：校验并暂存新配置，不得对读者可见。
+
+        抛出异常即否决整张变更单。默认实现为空操作（无可暂存状态）。
+        ``context`` 包含 change_id、扩展名、变更前后条目与 serverapp。
+        """
+
+    async def commit_config_change(self, change, context):
+        """提交阶段钩子：把已暂存的配置生效。
+
+        调用时配置文件与 ServerApp 运行时配置已完成原子切换；
+        此阶段的异常只记录，不再触发回退。默认实现为空操作。
+        """
+
+    async def rollback_config_change(self, change, context):
+        """回退阶段钩子：撤销 prepare 阶段的暂存状态。默认实现为空操作。"""
+
     def stop(self):
         """项目内部接口说明。"""
         assert self.serverapp is not None
